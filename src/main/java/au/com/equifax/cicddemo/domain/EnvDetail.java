@@ -4,6 +4,7 @@ public class EnvDetail {
     private String ip;
     private String hostname;
     private String os;
+    private String version;
 
     public String getIp() {
         return ip;
@@ -28,4 +29,10 @@ public class EnvDetail {
     public void setOs(String os) {
         this.os = os;
     }
+
+    public String getVersion() { return version; }
+    public void setVersion(String version) { this.version = version; 
+}
+
+    
 }

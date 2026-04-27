@@ -17,6 +17,7 @@ public class ApiController {
         env.setHostname(inetAddress.getHostName());
         env.setIp(inetAddress.getHostAddress());
         env.setOs(System.getProperty("os.name"));
+        env.setVersion("2.0-with-debt");
         return env;
     }
 }
