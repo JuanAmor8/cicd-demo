@@ -2,12 +2,16 @@ pipeline {
     agent any
 
     stages {
+
+        // ETAPA 1: Obtener código fuente desde GitHub
         stage('Checkout') {
             steps {
-                git 'https://github.com/JuanAmor8/cicd-demo.git'
+                git branch: 'master',
+                    url: 'https://github.com/JuanAmor8/cicd-demo.git'
             }
         }
 
+        // ETAPA 2: Compilar y ejecutar pruebas unitarias con cobertura JaCoCo
         stage('Build & Test') {
             steps {
                 sh 'mvn clean package'
@@ -19,17 +23,23 @@ pipeline {
             }
         }
 
+        // ETAPA 3: Análisis estático de calidad con SonarQube
         stage('Static Analysis (SonarQube)') {
-            environment {
-                SONAR_TOKEN = credentials('sonar-token')
-            }
             steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh 'mvn sonar:sonar -Dsonar.projectKey=mi-app -Dsonar.host.url=http://sonarqube:9000 -Dsonar.login=${SONAR_TOKEN}'
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONARTOKEN')]) {
+                    withSonarQubeEnv('SonarQube') {
+                        sh '''
+                            mvn sonar:sonar \
+                                -Dsonar.projectKey=mi-app \
+                                -Dsonar.host.url=http://sonarqube:9000 \
+                                -Dsonar.login=$SONARTOKEN
+                        '''
+                    }
                 }
             }
         }
 
+        // ETAPA 4: Puerta de calidad — bloquea si SonarQube no aprueba
         stage('Quality Gate') {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
@@ -38,34 +48,36 @@ pipeline {
             }
         }
 
+        // ETAPA 5: Escaneo de seguridad en imagen Docker con Trivy
+        // --exit-code 1 hace que el pipeline falle si hay CVEs CRITICAL
         stage('Container Security Scan (Trivy)') {
             steps {
                 sh 'docker build -t mi-app:latest .'
-                sh 'trivy image --severity LOW,MEDIUM,HIGH --exit-code 0 mi-app:latest'
                 sh 'trivy image --severity CRITICAL --exit-code 1 mi-app:latest'
             }
         }
 
+        // ETAPA 6: Despliegue local en puerto 80
         stage('Deploy') {
-            when { branch 'master' }
             steps {
-                sh 'docker stop mi-app-running 2>/dev/null || true'
-                sh 'docker rm mi-app-running 2>/dev/null || true'
-                sh 'docker run -d --name mi-app-running -p 80:8080 mi-app:latest'
+                sh 'docker stop mi-app-container || true'
+                sh 'docker rm   mi-app-container || true'
+                sh 'docker run -d --name mi-app-container -p 80:8080 mi-app:latest'
             }
         }
     }
 
+    // Limpieza e infraestructura — se ejecuta siempre
     post {
         always {
             echo 'Limpiando entorno...'
             cleanWs()
         }
-        success {
-            echo '✅ Pipeline ejecutado exitosamente.'
-        }
         failure {
-            echo '❌ Pipeline fallido. Revisar logs para más detalles.'
+            echo 'Pipeline fallido. Revisar logs para más detalles.'
+        }
+        success {
+            echo 'Pipeline completado exitosamente. Aplicación desplegada en puerto 80.'
         }
     }
 }
