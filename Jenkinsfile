@@ -12,16 +12,21 @@ pipeline {
             steps {
                 sh 'mvn clean package'
             }
+            post {
+                always {
+                    junit '**/target/surefire-reports/*.xml'
+                }
+            }
         }
 
         stage('Static Analysis (SonarQube)') {
+            environment {
+                SONAR_TOKEN = credentials('sonar-token')
+            }
             steps {
                 withSonarQubeEnv('SonarQube') {
                     sh 'mvn sonar:sonar -Dsonar.projectKey=mi-app -Dsonar.host.url=http://sonarqube:9000 -Dsonar.login=${SONAR_TOKEN}'
                 }
-            }
-            environment {
-                SONAR_TOKEN = credentials('sonar-token')
             }
         }
 
