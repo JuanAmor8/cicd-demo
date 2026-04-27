@@ -1,93 +1,66 @@
-#!/usr/bin/env groovy
-
 pipeline {
-    environment{
-       FEATURE_NAME = BRANCH_NAME.replaceAll('[\\(\\)_/]','-').toLowerCase()
-       REGISTRY_PASSWORD = credentials('REGISTRY_PASSWORD')
-       REGISTRY_USERNAME = credentials('REGISTRY_USERNAME')
-       POSTGRES_PASSWORD = credentials('POSTGRES_PASSWORD')
-       APP_NAME = "cicd-demo"
-    }
-    agent any 
-    stages {
-        stage('Docker Build & Push') {
-            steps {
-                sh "make dockerLogin build dockerBuild dockerPush"
-            }
+    agent any
 
-        }
-		// not in parallel due to race condition with .env
-        stage('Docker Scan') {
+    stages {
+        stage('Checkout') {
             steps {
-                sh "make dockerScan"
+                git 'https://github.com/JuanAmor8/cicd-demo.git'
             }
-            post {
-                cleanup {
-                    sh "docker-compose down -v"
+        }
+
+        stage('Build & Test') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Static Analysis (SonarQube)') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh 'mvn sonar:sonar -Dsonar.projectKey=mi-app -Dsonar.host.url=http://sonarqube:9000 -Dsonar.login=${SONAR_TOKEN}'
+                }
+            }
+            environment {
+                SONAR_TOKEN = credentials('sonar-token')
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
-        
-        stage('Parallel Tests') {
-            failFast true            
-            parallel {                  
-                stage('Static Code Analysis') {
-                    when {
-                        anyOf { branch 'master'; branch 'release'}
-                    }    
-                    steps {
-                        sh "make publishSonar"                        
-                    }
-                }
-                stage('Integration Tests') {
-                    steps {
-                        sh "make integrationTest"
-                    }
-                }
+
+        stage('Container Security Scan (Trivy)') {
+            steps {
+                sh 'docker build -t mi-app:latest .'
+                sh 'trivy image --severity LOW,MEDIUM,HIGH --exit-code 0 mi-app:latest'
+                sh 'trivy image --severity CRITICAL --exit-code 1 mi-app:latest'
             }
         }
-        stage('Push Latest Tag') {
+
+        stage('Deploy') {
             when { branch 'master' }
             steps {
-                sh "make dockerPushLatest"
+                sh 'docker stop mi-app-running 2>/dev/null || true'
+                sh 'docker rm mi-app-running 2>/dev/null || true'
+                sh 'docker run -d --name mi-app-running -p 80:8080 mi-app:latest'
             }
         }
-
-        stage('Deploy To dev') {
-            environment { 
-                ENV = "dev"
-                APP_DNS = util.selectAppUrl(ENV, FEATURE_NAME, APP_NAME)
-                KUBE_SERVER = credentials("KUBE_API_SERVER")
-                KUBE_TOKEN = credentials("KUBE_DEV_TOKEN")
-            }
-            steps {
-                sh "make kubeLogin deploy"
-            }
-        }
-        
-        stage('Deploy To qa') {
-            when { expression { BRANCH_NAME ==~ /(master|release-[0-9]+$)/ }} // Only Master and Release branches 
-            environment { 
-                ENV = "qa"
-                APP_DNS = util.selectAppUrl(ENV, FEATURE_NAME, APP_NAME)
-                KUBE_SERVER = credentials("KUBE_API_SERVER")
-                KUBE_TOKEN = credentials("KUBE_QA_TOKEN")
-            }
-            steps {
-                sh "make kubeLogin deploy"
-            }
-        }
-        
     }
+
     post {
         always {
-            script {
-                if(BRANCH_NAME ==~ /(master|release-[0-9]+$)/ ){
-                     util.notifySlack(currentBuild.result)
-                 }
-            }
-            archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
-            junit 'target/surefire-reports/*.xml'
+            echo 'Limpiando entorno...'
+            cleanWs()
+        }
+        success {
+            echo '✅ Pipeline ejecutado exitosamente.'
+        }
+        failure {
+            echo '❌ Pipeline fallido. Revisar logs para más detalles.'
         }
     }
 }
