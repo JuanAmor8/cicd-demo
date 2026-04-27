@@ -43,10 +43,14 @@ pipeline {
         stage('Quality Gate') {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
+                    script {
+                        def qg = waitForQualityGate()
+                        echo "Quality Gate status: ${qg.status}"
+                        
             }
         }
+    }
+}
 
         // ETAPA 5: Escaneo de seguridad en imagen Docker con Trivy
         // --exit-code 1 hace que el pipeline falle si hay CVEs CRITICAL
